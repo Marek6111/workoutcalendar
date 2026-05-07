@@ -1255,98 +1255,154 @@ function switchTab(id, btn) {
 // ── STATS ─────────────────────────────────
 let pieChartInst = null, barChartInst = null;
 
+// Safe date parse — always treat date strings as local noon to avoid timezone shifts
+function parseLocalDate(ds) {
+  return new Date(ds + 'T12:00:00');
+}
+
 function renderStats() {
   const period = document.getElementById('stats-period').value;
-  let fromDate = null;
+
+  // Build a cutoff date string for comparison (YYYY-MM-DD, no timezone issues)
+  let fromDateStr = null;
   if (period !== 'all') {
-    fromDate = new Date();
-    fromDate.setDate(fromDate.getDate() - parseInt(period));
+    const d = new Date();
+    d.setDate(d.getDate() - parseInt(period));
+    fromDateStr = dateStr(d);
   }
 
   const filtered = period === 'all'
     ? workouts
-    : workouts.filter(w => new Date(w.date) >= fromDate);
+    : workouts.filter(w => w.date >= fromDateStr);
 
-  // stat cards
+  // ── Stat cards ──────────────────────────
   const totalSessions = filtered.length;
   const totalMins = filtered.reduce((s,w) => s + (w.duration_min || 0), 0);
-  const uniqueDays = new Set(filtered.map(w=>w.date)).size;
-  const avgDur = filtered.filter(w=>w.duration_min).length
-    ? Math.round(filtered.filter(w=>w.duration_min).reduce((s,w)=>s+(w.duration_min||0),0) / filtered.filter(w=>w.duration_min).length)
+  const uniqueDays = new Set(filtered.map(w => w.date)).size;
+  const withDur = filtered.filter(w => w.duration_min);
+  const avgDur = withDur.length
+    ? Math.round(withDur.reduce((s,w) => s + w.duration_min, 0) / withDur.length)
     : 0;
 
   document.getElementById('stats-cards').innerHTML = `
     <div class="stat-card"><div class="stat-label">Sessions</div><div class="stat-value">${totalSessions}</div></div>
     <div class="stat-card"><div class="stat-label">Active days</div><div class="stat-value">${uniqueDays}</div></div>
-    <div class="stat-card"><div class="stat-label">Total time</div><div class="stat-value">${totalMins > 0 ? totalMins : '—'}<span class="stat-unit"> ${totalMins > 0 ? 'min' : ''}</span></div></div>
-    <div class="stat-card"><div class="stat-label">Avg duration</div><div class="stat-value">${avgDur > 0 ? avgDur : '—'}<span class="stat-unit"> ${avgDur > 0 ? 'min' : ''}</span></div></div>`;
+    <div class="stat-card"><div class="stat-label">Total time</div><div class="stat-value">${totalMins > 0 ? totalMins : '—'}<span class="stat-unit">${totalMins > 0 ? ' min' : ''}</span></div></div>
+    <div class="stat-card"><div class="stat-label">Avg duration</div><div class="stat-value">${avgDur > 0 ? avgDur : '—'}<span class="stat-unit">${avgDur > 0 ? ' min' : ''}</span></div></div>`;
 
-  // pie chart
-  const typeCounts = {};
-  Object.keys(WORKOUT_TYPES).forEach(k => typeCounts[k] = 0);
-  filtered.forEach(w => { if (typeCounts[w.type] !== undefined) typeCounts[w.type]++; });
+  // ── Pie chart ───────────────────────────
+  const typeCounts = { lower_body:0, upper_body:0, cardio:0, fasted_cardio:0 };
+  filtered.forEach(w => { if (w.type in typeCounts) typeCounts[w.type]++; });
 
-  const pieLabels = Object.values(WORKOUT_TYPES).map(t=>t.label);
-  const pieData   = Object.keys(WORKOUT_TYPES).map(k=>typeCounts[k]);
-  const pieColors = Object.values(WORKOUT_TYPES).map(t=>t.color);
+  // Only show types that have at least 1 session
+  const pieEntries = Object.entries(WORKOUT_TYPES).filter(([k]) => typeCounts[k] > 0);
+  const pieLabels = pieEntries.map(([,v]) => v.label);
+  const pieData   = pieEntries.map(([k]) => typeCounts[k]);
+  const pieColors = pieEntries.map(([,v]) => v.color);
 
   if (pieChartInst) pieChartInst.destroy();
   pieChartInst = new Chart(document.getElementById('pieChart'), {
     type: 'doughnut',
-    data: { labels: pieLabels, datasets: [{ data: pieData, backgroundColor: pieColors, borderWidth: 2, borderColor:'#fff' }] },
+    data: {
+      labels: pieLabels,
+      datasets: [{ data: pieData, backgroundColor: pieColors, borderWidth: 3, borderColor:'#fff' }]
+    },
     options: {
-      cutout: '60%',
+      cutout: '58%',
       plugins: {
         legend: {
           position: 'bottom',
-          labels: { font: { family:'DM Sans', size:12 }, padding:16, boxWidth:12, boxHeight:12 }
+          labels: { font:{ family:'DM Sans', size:12 }, padding:16, boxWidth:12, boxHeight:12 }
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.label}: ${ctx.parsed} session${ctx.parsed !== 1 ? 's' : ''}`
+          }
         }
       }
     }
   });
 
-  // bar chart — weekly counts
-  const weeks = {};
-  filtered.forEach(w => {
-    const d = new Date(w.date);
-    const mon = new Date(d);
-    mon.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-    const key = dateStr(mon);
-    if (!weeks[key]) weeks[key] = { lower_body:0, upper_body:0, cardio:0, fasted_cardio:0 };
-    if (weeks[key][w.type] !== undefined) weeks[key][w.type]++;
-  });
+  // ── Bar chart — group by week (Mon–Sun), show label as "6 May" for Mon of that week ──
+  // Decide grouping: daily if ≤14 days, weekly otherwise
+  const useDailyGrouping = period !== 'all' && parseInt(period) <= 14;
 
-  const sortedWeeks = Object.keys(weeks).sort();
-  const barLabels = sortedWeeks.map(w => {
-    const d = new Date(w + 'T12:00:00');
-    return d.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+  const buckets = {};
+
+  if (useDailyGrouping) {
+    // Daily: one bar per day that has a workout
+    filtered.forEach(w => {
+      if (!buckets[w.date]) buckets[w.date] = { lower_body:0, upper_body:0, cardio:0, fasted_cardio:0 };
+      if (w.type in buckets[w.date]) buckets[w.date][w.type]++;
+    });
+  } else {
+    // Weekly: group by Monday of that week
+    filtered.forEach(w => {
+      const d = parseLocalDate(w.date);
+      const dayOfWeek = d.getDay(); // 0=Sun
+      const daysFromMon = (dayOfWeek + 6) % 7;
+      const mon = new Date(d);
+      mon.setDate(d.getDate() - daysFromMon);
+      const key = dateStr(mon);
+      if (!buckets[key]) buckets[key] = { lower_body:0, upper_body:0, cardio:0, fasted_cardio:0 };
+      if (w.type in buckets[key]) buckets[key][w.type]++;
+    });
+  }
+
+  const sortedKeys = Object.keys(buckets).sort();
+  const barLabels = sortedKeys.map(k => {
+    const d = parseLocalDate(k);
+    return d.toLocaleDateString('en-GB', { day:'numeric', month:'short' });
   });
 
   const mkDataset = (key) => ({
     label: WORKOUT_TYPES[key].label,
-    data: sortedWeeks.map(w => weeks[w][key]),
+    data: sortedKeys.map(k => buckets[k][key]),
     backgroundColor: WORKOUT_TYPES[key].color,
-    borderRadius: 4,
+    borderRadius: 3,
     borderSkipped: false,
   });
+
+  // Dynamic bar thickness: wider bars when few data points
+  const barCount = sortedKeys.length;
+  const barThickness = barCount <= 2 ? 40 : barCount <= 7 ? 28 : undefined;
 
   if (barChartInst) barChartInst.destroy();
   barChartInst = new Chart(document.getElementById('barChart'), {
     type: 'bar',
     data: {
       labels: barLabels,
-      datasets: ['lower_body','upper_body','cardio','fasted_cardio'].map(mkDataset)
+      datasets: ['lower_body','upper_body','cardio','fasted_cardio'].map(k => ({
+        ...mkDataset(k),
+        ...(barThickness ? { barThickness } : {}),
+      }))
     },
     options: {
       plugins: {
         legend: {
           position: 'bottom',
           labels: { font:{ family:'DM Sans', size:12 }, padding:16, boxWidth:12, boxHeight:12 }
+        },
+        tooltip: {
+          callbacks: {
+            title: ctx => useDailyGrouping
+              ? parseLocalDate(sortedKeys[ctx[0].dataIndex]).toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'})
+              : `Week of ${barLabels[ctx[0].dataIndex]}`
+          }
         }
       },
       scales: {
-        x: { stacked: true, grid: { display:false }, ticks:{ font:{ family:'DM Sans', size:11 }, maxRotation:45 } },
-        y: { stacked: true, grid: { color:'#EDE9E1' }, ticks:{ font:{ family:'DM Sans', size:11 }, stepSize:1 }, beginAtZero:true }
+        x: {
+          stacked: true,
+          grid: { display: false },
+          ticks: { font:{ family:'DM Sans', size:11 }, maxRotation: 45 }
+        },
+        y: {
+          stacked: true,
+          grid: { color:'#EDE9E1' },
+          ticks: { font:{ family:'DM Sans', size:11 }, stepSize:1, precision:0 },
+          beginAtZero: true
+        }
       }
     }
   });
