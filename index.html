@@ -1300,6 +1300,10 @@ function renderStats() {
   const pieData   = pieEntries.map(([k]) => typeCounts[k]);
   const pieColors = pieEntries.map(([,v]) => v.color);
 
+  // Build duration totals per type for pie tooltip
+  const typeMins = { lower_body:0, upper_body:0, cardio:0, fasted_cardio:0 };
+  filtered.forEach(w => { if (w.type in typeMins) typeMins[w.type] += (w.duration_min || 0); });
+
   if (pieChartInst) pieChartInst.destroy();
   pieChartInst = new Chart(document.getElementById('pieChart'), {
     type: 'doughnut',
@@ -1316,7 +1320,13 @@ function renderStats() {
         },
         tooltip: {
           callbacks: {
-            label: ctx => ` ${ctx.label}: ${ctx.parsed} session${ctx.parsed !== 1 ? 's' : ''}`
+            label: ctx => {
+              const typeKey = pieEntries[ctx.dataIndex][0];
+              const mins = typeMins[typeKey];
+              const count = ctx.parsed;
+              if (mins > 0) return ` ${ctx.label}: ${count} session${count !== 1 ? 's' : ''} · ${mins} min`;
+              return ` ${ctx.label}: ${count} session${count !== 1 ? 's' : ''}`;
+            }
           }
         }
       }
@@ -1332,20 +1342,26 @@ function renderStats() {
   if (useDailyGrouping) {
     // Daily: one bar per day that has a workout
     filtered.forEach(w => {
-      if (!buckets[w.date]) buckets[w.date] = { lower_body:0, upper_body:0, cardio:0, fasted_cardio:0 };
-      if (w.type in buckets[w.date]) buckets[w.date][w.type]++;
+      if (!buckets[w.date]) buckets[w.date] = { lower_body:0, upper_body:0, cardio:0, fasted_cardio:0, lower_body_mins:0, upper_body_mins:0, cardio_mins:0, fasted_cardio_mins:0 };
+      if (w.type in buckets[w.date]) {
+        buckets[w.date][w.type]++;
+        buckets[w.date][w.type + '_mins'] += (w.duration_min || 0);
+      }
     });
   } else {
     // Weekly: group by Monday of that week
     filtered.forEach(w => {
       const d = parseLocalDate(w.date);
-      const dayOfWeek = d.getDay(); // 0=Sun
+      const dayOfWeek = d.getDay();
       const daysFromMon = (dayOfWeek + 6) % 7;
       const mon = new Date(d);
       mon.setDate(d.getDate() - daysFromMon);
       const key = dateStr(mon);
-      if (!buckets[key]) buckets[key] = { lower_body:0, upper_body:0, cardio:0, fasted_cardio:0 };
-      if (w.type in buckets[key]) buckets[key][w.type]++;
+      if (!buckets[key]) buckets[key] = { lower_body:0, upper_body:0, cardio:0, fasted_cardio:0, lower_body_mins:0, upper_body_mins:0, cardio_mins:0, fasted_cardio_mins:0 };
+      if (w.type in buckets[key]) {
+        buckets[key][w.type]++;
+        buckets[key][w.type + '_mins'] += (w.duration_min || 0);
+      }
     });
   }
 
@@ -1389,7 +1405,17 @@ function renderStats() {
           callbacks: {
             title: ctx => useDailyGrouping
               ? parseLocalDate(sortedKeys[ctx[0].dataIndex]).toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'})
-              : `Week of ${barLabels[ctx[0].dataIndex]}`
+              : `Week of ${barLabels[ctx[0].dataIndex]}`,
+            label: ctx => {
+              if (ctx.parsed.y === 0) return null;
+              const bucketKey = sortedKeys[ctx.dataIndex];
+              const typeKey = ['lower_body','upper_body','cardio','fasted_cardio'][ctx.datasetIndex];
+              const mins = buckets[bucketKey][typeKey + '_mins'];
+              const count = buckets[bucketKey][typeKey];
+              const typeName = WORKOUT_TYPES[typeKey].label;
+              if (mins > 0) return ` ${typeName}: ${mins} min`;
+              return ` ${typeName}: ${count} session${count !== 1 ? 's' : ''}`;
+            }
           }
         }
       },
