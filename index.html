@@ -403,8 +403,35 @@
     width: 40px; height: 4px;
     background: var(--cream-border);
     border-radius: 2px;
-    margin: 1rem auto 1.5rem;
+    margin: 0 auto;
   }
+
+  .sheet-top-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    padding: 1rem 0 1.25rem;
+  }
+
+  .sheet-close {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    border: 1px solid var(--cream-border);
+    background: var(--cream);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s;
+    line-height: 1;
+  }
+
+  .sheet-close:hover { background: var(--cream-dark); color: var(--text-primary); }
 
   .sheet-title {
     font-family: 'DM Serif Display', serif;
@@ -749,7 +776,7 @@
     <div class="auth-error" id="auth-error"></div>
     <div class="form-group">
       <label>Password</label>
-      <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')handleAuth()">
+      <input type="password" id="auth-password" placeholder="" autocomplete="current-password" onkeydown="if(event.key==='Enter')handleAuth()">
     </div>
     <button class="btn-primary" id="auth-btn" onclick="handleAuth()">Let me in ✨</button>
   </div>
@@ -845,7 +872,10 @@
 <!-- DAY SHEET (view/add) -->
 <div class="modal-overlay" id="day-modal" onclick="closeDayModal(event)">
   <div class="modal-sheet">
-    <div class="sheet-handle"></div>
+    <div class="sheet-top-row">
+      <div class="sheet-handle"></div>
+      <button class="sheet-close" onclick="document.getElementById('day-modal').classList.remove('open')" aria-label="Close">✕</button>
+    </div>
     <div id="day-sheet-content"></div>
   </div>
 </div>
@@ -853,7 +883,10 @@
 <!-- ADD WORKOUT SHEET (from FAB) -->
 <div class="modal-overlay" id="add-modal" onclick="closeAddModal(event)">
   <div class="modal-sheet">
-    <div class="sheet-handle"></div>
+    <div class="sheet-top-row">
+      <div class="sheet-handle"></div>
+      <button class="sheet-close" onclick="document.getElementById('add-modal').classList.remove('open')" aria-label="Close">✕</button>
+    </div>
     <div id="add-sheet-content"></div>
   </div>
 </div>
