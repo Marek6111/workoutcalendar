@@ -858,7 +858,7 @@
       </div>
 
       <div class="chart-container">
-        <h3>Weekly activity</h3>
+        <h3 id="bar-chart-title">Daily activity</h3>
         <canvas id="barChart" height="220"></canvas>
       </div>
 
@@ -1324,8 +1324,8 @@ function renderStats() {
   });
 
   // ── Bar chart — group by week (Mon–Sun), show label as "6 May" for Mon of that week ──
-  // Decide grouping: daily if ≤14 days, weekly otherwise
-  const useDailyGrouping = period !== 'all' && parseInt(period) <= 14;
+  // Daily grouping for ≤60 days, weekly for longer periods
+  const useDailyGrouping = period === 'all' ? false : parseInt(period) <= 60;
 
   const buckets = {};
 
@@ -1366,6 +1366,8 @@ function renderStats() {
   // Dynamic bar thickness: wider bars when few data points
   const barCount = sortedKeys.length;
   const barThickness = barCount <= 2 ? 40 : barCount <= 7 ? 28 : undefined;
+
+  document.getElementById('bar-chart-title').textContent = useDailyGrouping ? 'Daily activity' : 'Weekly activity';
 
   if (barChartInst) barChartInst.destroy();
   barChartInst = new Chart(document.getElementById('barChart'), {
